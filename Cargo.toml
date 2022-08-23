@@ -1,0 +1,16 @@
+[package]
+name = "dwl-waybar"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "dwl-waybar-server"
+path = "src/server.rs"
+
+[[bin]]
+name = "dwl-waybar-client"
+path = "src/client.rs"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
