@@ -22,6 +22,27 @@ enum SubscribeData {
     None,
 }
 
+macro_rules! unwrap_cont {
+    ($option:expr, Option) => {
+        match $option {
+            Some(option) => option,
+            None => {
+                eprintln!("None value at {}:{}!", file!(), line!());
+                continue;
+            }
+        }
+    };
+    ($result:expr, Result) => {
+        match $result {
+            Ok(result) => result,
+            Err(why) => {
+                eprintln!("Error value at {}:{}! {}", file!(), line!(), why);
+                continue;
+            }
+        }
+    };
+}
+
 fn main() {
     // Create the listener and set it to non-blocking to allow for inter-thread communication
     let listener = UnixListener::bind(common::SOCKET_PATH).unwrap();
@@ -79,13 +100,13 @@ fn main() {
         };
 
         let mut split = line.split(" ");
-        let output = split.next().unwrap();
-        let sub_type = split.next().unwrap();
+        let output = unwrap_cont!(split.next(), Option);
+        let sub_type = unwrap_cont!(split.next(), Option);
 
         // Determine the type of the subscription to data
         let (sub_type, sub_data) = match sub_type {
             common::TAG_CMD => {
-                let number: u16 = split.next().unwrap().parse().unwrap();
+                let number: u16 = unwrap_cont!(unwrap_cont!(split.next(), Option).parse(), Result);
                 (SubscribeType::Tag, SubscribeData::Tag(number))
             }
             common::TITLE_CMD => (SubscribeType::Title, SubscribeData::None),
@@ -102,19 +123,16 @@ fn main() {
             .push((stream, sub_data));
     });
 
-    thread::sleep(Duration::from_secs(5));
-
-    println!("{:?}", streams);
-
     for line in BufReader::new(stdin()).lines() {
-        let line = line.unwrap();
+        let line = unwrap_cont!(line, Result);
         let mut split = line.splitn(3, " ");
-        let output = split.next().unwrap();
-        let name = split.next().unwrap();
-        let value = split.next().unwrap();
+        let output = unwrap_cont!(split.next(), Option);
+        let name = unwrap_cont!(split.next(), Option);
+        let value = unwrap_cont!(split.next(), Option);
 
         let mut streams = streams.lock().unwrap();
 
+        // Get all streams for the current output
         let map = match streams.get_mut(output) {
             Some(streams) => streams,
             None => continue,
@@ -122,15 +140,22 @@ fn main() {
 
         match name {
             "tags" => {
+                // Get all the streams subscribed to Tag data
                 let streams = match map.get_mut(&SubscribeType::Tag) {
                     Some(streams) => streams,
                     None => continue,
                 };
+                // Parse the tag values from the DWL output
                 let mut tags_split = value.split(" ");
-                let active: u16 = tags_split.next().unwrap().parse().unwrap();
-                let selected: u16 = tags_split.next().unwrap().parse().unwrap();
-                let urgent: u16 = tags_split.skip(1).next().unwrap().parse().unwrap();
-
+                let active: u16 =
+                    unwrap_cont!(unwrap_cont!(tags_split.next(), Option).parse(), Result);
+                let selected: u16 =
+                    unwrap_cont!(unwrap_cont!(tags_split.next(), Option).parse(), Result);
+                let urgent: u16 = unwrap_cont!(
+                    unwrap_cont!(tags_split.skip(1).next(), Option).parse(),
+                    Result
+                );
+                
                 for (stream, data) in streams.iter_mut() {
                     let tag = *match data {
                         SubscribeData::Tag(number) => number,
