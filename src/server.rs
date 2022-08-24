@@ -132,6 +132,10 @@ fn main() {
 
         let mut streams = streams.lock().unwrap();
 
+        if !streams.contains_key(output) {
+            continue;
+        }
+
         // Get all streams for the current output
         let map = match streams.get_mut(output) {
             Some(streams) => streams,
@@ -155,7 +159,7 @@ fn main() {
                     unwrap_cont!(tags_split.skip(1).next(), Option).parse(),
                     Result
                 );
-                
+
                 for (stream, data) in streams.iter_mut() {
                     let tag = *match data {
                         SubscribeData::Tag(number) => number,
@@ -173,13 +177,35 @@ fn main() {
                     if urgent & mask == mask {
                         classes.push("urgent");
                     }
-                    writeln!(
-                        *stream,
-                        "{{ \"text\": \"{}\", \"classes\": [\"{}\"] }}",
-                        tag + 1,
-                        classes.join("\",\"")
-                    )
-                    .unwrap();
+                    unwrap_cont!(
+                        writeln!(
+                            stream,
+                            "{{ \"text\": \"{}\", \"classes\": [\"{}\"] }}",
+                            tag + 1,
+                            classes.join("\",\"")
+                        ),
+                        Result
+                    );
+                }
+            }
+            "layout" => {
+                let streams = match map.get_mut(&SubscribeType::Layout) {
+                    Some(streams) => streams,
+                    None => continue,
+                };
+
+                for (stream, _) in streams {
+                    unwrap_cont!(writeln!(stream, "{{ \"text\": \"{}\" }}", value), Result);
+                }
+            }
+            "title" => {
+                let streams = match map.get_mut(&SubscribeType::Title) {
+                    Some(streams) => streams,
+                    None => continue,
+                };
+
+                for (stream, _) in streams {
+                    unwrap_cont!(writeln!(stream, "{{ \"text\": \"{}\" }}", value), Result);
                 }
             }
             _ => (),

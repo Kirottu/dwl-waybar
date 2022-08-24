@@ -58,10 +58,20 @@ fn main() {
         }
     };
 
+    let mut last = None;
+
     for line in BufReader::new(stream).lines() {
         match line {
             Ok(line) => {
-                println!("{}", line);
+                match last {
+                    Some(last) => {
+                        if last != line {
+                            println!("{}", line);
+                        }
+                    }
+                    None => println!("{}", line),
+                }
+                last = Some(line);
             }
             Err(why) => {
                 eprintln!("Failed to retrieve next value: {}", why);
