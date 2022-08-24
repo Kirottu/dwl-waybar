@@ -43,6 +43,25 @@ macro_rules! unwrap_cont {
     };
 }
 
+macro_rules! check_stream {
+    ($streams:expr, $stream:expr) => {
+        match $stream.take_error() {
+            Ok(option) => match option {
+                Some(error) => match error.kind() {
+                    std::io::ErrorKind::BrokenPipe => {
+                        $streams.push(*$stream.clone());
+                    }
+                    _ => unimplemented!(),
+                },
+                None => (),
+            },
+            Err(why) => {
+                eprintln!("Failed to get error value from stream: {}", why);
+            }
+        }
+    };
+}
+
 fn main() {
     // Create the listener and set it to non-blocking to allow for inter-thread communication
     let listener = UnixListener::bind(common::SOCKET_PATH).unwrap();
@@ -160,6 +179,8 @@ fn main() {
                     Result
                 );
 
+                let mut to_delete = Vec::new();
+
                 for (stream, data) in streams.iter_mut() {
                     let tag = *match data {
                         SubscribeData::Tag(number) => number,
@@ -186,6 +207,7 @@ fn main() {
                         ),
                         Result
                     );
+                    check_stream!(to_delete, stream);
                 }
             }
             "layout" => {
