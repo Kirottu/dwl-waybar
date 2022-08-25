@@ -49,7 +49,7 @@ macro_rules! check_stream {
             Ok(option) => match option {
                 Some(error) => match error.kind() {
                     std::io::ErrorKind::BrokenPipe => {
-                        $streams.push(*$stream.clone());
+                        $streams.push($stream);
                     }
                     _ => unimplemented!(),
                 },
@@ -57,6 +57,24 @@ macro_rules! check_stream {
             },
             Err(why) => {
                 eprintln!("Failed to get error value from stream: {}", why);
+            }
+        }
+    };
+}
+
+macro_rules! retain_write {
+    ($stream:expr, $fmt:expr, $($arg:tt)*) => {
+        match writeln!($stream, $fmt, $($arg)*) {
+            Ok(_) => true,
+            Err(why) => {
+                eprintln!("Error writing to stream, removing it: {}", why);
+                match $stream.shutdown(std::net::Shutdown::Both) {
+                    Ok(_) => (),
+                    Err(why) => {
+                        eprintln!("Failed to shut down stream: {}", why);
+                    }
+                }
+                false
             }
         }
     };
@@ -99,6 +117,7 @@ fn main() {
                     }
                     Err(_) => (),
                 }
+                // Sleep for half a second to avoid unnecessary looping
                 thread::sleep(Duration::from_millis(500));
                 continue;
             }
@@ -118,6 +137,7 @@ fn main() {
             }
         };
 
+        // Parse the information given by the client
         let mut split = line.split(" ");
         let output = unwrap_cont!(split.next(), Option);
         let sub_type = unwrap_cont!(split.next(), Option);
@@ -132,17 +152,21 @@ fn main() {
             common::LAYOUT_CMD => (SubscribeType::Layout, SubscribeData::None),
             _ => unimplemented!(),
         };
+        // Lock the global streams value
         let mut streams = streams_clone.lock().unwrap();
 
         let entry = streams.entry(output.to_string()).or_insert(HashMap::new());
 
+        // Add the stream to the list
         entry
             .entry(sub_type)
             .or_insert(Vec::new())
             .push((stream, sub_data));
     });
 
+    // Loop through the lines of the stdin from DWL
     for line in BufReader::new(stdin()).lines() {
+        // Parse all of the values
         let line = unwrap_cont!(line, Result);
         let mut split = line.splitn(3, " ");
         let output = unwrap_cont!(split.next(), Option);
@@ -151,6 +175,7 @@ fn main() {
 
         let mut streams = streams.lock().unwrap();
 
+        // If the output is not registered by any clients, ignore it
         if !streams.contains_key(output) {
             continue;
         }
@@ -161,6 +186,7 @@ fn main() {
             None => continue,
         };
 
+        // Work based on the data from DWL
         match name {
             "tags" => {
                 // Get all the streams subscribed to Tag data
@@ -179,9 +205,7 @@ fn main() {
                     Result
                 );
 
-                let mut to_delete = Vec::new();
-
-                for (stream, data) in streams.iter_mut() {
+                streams.retain_mut(|(stream, data)| {
                     let tag = *match data {
                         SubscribeData::Tag(number) => number,
                         _ => unreachable!(),
@@ -198,37 +222,32 @@ fn main() {
                     if urgent & mask == mask {
                         classes.push("urgent");
                     }
-                    unwrap_cont!(
-                        writeln!(
-                            stream,
-                            "{{ \"text\": \"{}\", \"classes\": [\"{}\"] }}",
-                            tag + 1,
-                            classes.join("\",\"")
-                        ),
-                        Result
-                    );
-                    check_stream!(to_delete, stream);
-                }
+
+                    retain_write!(
+                        stream,
+                        "{{ \"text\": \" {} \", \"class\": [\"{}\"] }}",
+                        tag + 1,
+                        classes.join("\",\"")
+                    )
+                });
             }
             "layout" => {
                 let streams = match map.get_mut(&SubscribeType::Layout) {
                     Some(streams) => streams,
                     None => continue,
                 };
-
-                for (stream, _) in streams {
-                    unwrap_cont!(writeln!(stream, "{{ \"text\": \"{}\" }}", value), Result);
-                }
+                streams.retain_mut(|(stream, _)| {
+                    retain_write!(stream, "{{ \"text\": \"{}\" }}", value)
+                });
             }
             "title" => {
                 let streams = match map.get_mut(&SubscribeType::Title) {
                     Some(streams) => streams,
                     None => continue,
                 };
-
-                for (stream, _) in streams {
-                    unwrap_cont!(writeln!(stream, "{{ \"text\": \"{}\" }}", value), Result);
-                }
+                streams.retain_mut(|(stream, _)| {
+                    retain_write!(stream, "{{ \"text\": \"{}\" }}", value)
+                });
             }
             _ => (),
         }
